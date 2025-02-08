@@ -88,7 +88,7 @@ def FloodFillFromPoint(image: np.ndarray, point: tuple[int, int],
     return image
 
 
-def FindWayFromMaze(image: np.ndarray) -> tuple:
+def FindWayFromMaze(image: np.ndarray) -> tuple[list[int], list[int]]:
     """
     Находит путь через лабиринт.
 
@@ -99,19 +99,28 @@ def FindWayFromMaze(image: np.ndarray) -> tuple:
         tuple: координаты пути из лабиринта в виде (x, y), где x и y - это массивы координат.
     """
 
-    coords = None
-    # Ваш код тут
-
     image = FloodFillFromPoint(image, (0, 0), (0, 255, 0))
+
+    x_list: list[int] = []
+    y_list: list[int] = []
 
     h, w = image.shape[:-1]
 
     entry_point, exit_point = FindMazeEntryAndExit(image)
 
+    image[entry_point] = [0, 0, 255]
+    image[exit_point] = [0, 0, 255]
+
+    x_list.append(entry_point[0])
+    y_list.append(entry_point[1])
+
     for i in range(h):
         for j in range(w):
             pass
 
+    x_list.append(exit_point[0])
+    y_list.append(exit_point[1])
+
     image = FloodFillFromPoint(image, (0, 0), (0, 0, 0))
 
-    return coords
+    return (x_list, y_list)
