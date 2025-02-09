@@ -15,7 +15,7 @@ def FindMazeEntryAndExit(image: np.ndarray) -> tuple[tuple[int, int], tuple[int,
         ((x_entry, y_entry), (x_exit, y_exit))
     """
 
-    h, _ = image.shape[:-1]
+    h, _, _ = image.shape
 
     up_endpoints: list[int] = []
     down_endpoints: list[int] = []
@@ -46,10 +46,10 @@ def FindMazeEntryAndExit(image: np.ndarray) -> tuple[tuple[int, int], tuple[int,
     if not up_endpoints or not down_endpoints:
         raise ValueError("FindMazeEntryAndExit: enter or exit is not found.")
 
-    entry_i = int(0.5 * (up_endpoints[0] + up_endpoints[1]))
-    exit_i = int(0.5 * (down_endpoints[0] + down_endpoints[1]))
+    entry_x: int = (up_endpoints[0] + up_endpoints[1]) // 2
+    exit_x: int = (down_endpoints[0] + down_endpoints[1]) // 2
 
-    return ((entry_i, 0), (exit_i, h - 1))
+    return ((entry_x, 0), (exit_x, h - 1))
 
 
 def FloodFillFromPoint(image: np.ndarray, point: tuple[int, int],
@@ -75,7 +75,7 @@ def FloodFillFromPoint(image: np.ndarray, point: tuple[int, int],
             raise ValueError(
                 "FloodFillFromPoint: RGB color values ​​must be in range(0, 256).")
 
-    h, w = image.shape[:-1]
+    h, w, _ = image.shape
 
     if not (0 <= point[0] < w and 0 <= point[1] < h):
         raise ValueError("FloodFillFromPoint: point is outside image boundaries.")
@@ -104,7 +104,7 @@ def FindWayFromMaze(image: np.ndarray) -> tuple[list[int], list[int]]:
     x_list: list[int] = []
     y_list: list[int] = []
 
-    h, w = image.shape[:-1]
+    h, w, _ = image.shape
 
     entry_point, exit_point = FindMazeEntryAndExit(image)
 
