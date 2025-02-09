@@ -80,15 +80,103 @@ def FloodFillFromPoint(image: np.ndarray, point: tuple[int, int],
     if not (0 <= point[0] < w and 0 <= point[1] < h):
         raise ValueError("FloodFillFromPoint: point is outside image boundaries.")
 
-    # Создаем маску (на 2 пикселя больше изображения)
+    ff_image = image.copy()
+
+    # маска (на 2 пикселя больше изображения)
     mask = np.zeros((h+2, w+2), np.uint8)
 
-    _, image, _, _ = cv2.floodFill(image, mask, point, color)
+    _, ff_image, _, _ = cv2.floodFill(ff_image, mask, point, color)
 
-    return image
+    return ff_image
+
+
+def AddGrid(image: np.ndarray, step_size: int,
+            line_color: tuple[int, int, int] = (0, 0, 0), line_thickness: int = 1):
+
+    for color_value in line_color:
+        if not (0 <= color_value <= 255):
+            raise ValueError(
+                "AddGrid: RGB color values ​​must be in range(0, 256).")
+
+    h, w, _ = image.shape
+
+    grid_image = image.copy()
+
+    for x in range(0, w, step_size):
+        cv2.line(grid_image, (x, 0), (x, h), line_color, line_thickness)
+
+    for y in range(0, h, step_size):
+        cv2.line(grid_image, (0, y), (w, y), line_color, line_thickness)
+
+    return grid_image
+
+
+def GetMazeCellSize(image: np.ndarray) -> int:
+    # кол-во белых пикселей на входе + 2
+    return len(np.where(np.all(image[0] == [255, 255, 255], axis=1))[0]) + 2
+
+
+def GetCenterOfMazeCell(point: tuple[int, int],
+                        maze_cell_size: int) -> tuple[int, int]:
+    x, y = point
+
+    cell_x = (x // maze_cell_size) * maze_cell_size
+    cell_y = (y // maze_cell_size) * maze_cell_size
+
+    center_x = cell_x + maze_cell_size // 2
+    center_y = cell_y + maze_cell_size // 2
+
+    return (center_x, center_y)
+
+
+def GetPositionStatus(image: np.ndarray,
+                      point: tuple[int, int],
+                      maze_cell_size: int = 0  # 0 - неизвестна
+                      ) -> dict[str, tuple[int, list[int]]]:
+    if not maze_cell_size:
+        maze_cell_size = GetMazeCellSize(image)
+
+    c_point = GetCenterOfMazeCell(point, maze_cell_size)
+    x_c, y_c = c_point
+
+    print(x_c, y_c)
+
+    status = {
+        "up": (0, [255, 255, 255]),      # (int, color)
+        "down": (0, [255, 255, 255]),    # (int, color)
+        "right": (0, [255, 255, 255]),   # (int, color)
+        "left": (0, [255, 255, 255])     # (int, color)
+    }
+
+    is_gotten = {
+        "up": False,
+        "down": False,
+        "right": False,
+        "left": False
+    }
+
+    for pix in range(maze_cell_size // 2 + 2):
+        if np.any(np.not_equal(image[y_c - pix, x_c], [255, 255, 255])) and not is_gotten["up"]:
+            status["up"] = (pix, image[y_c - pix, x_c])
+            is_gotten["up"] = True
+
+        if np.any(np.not_equal(image[y_c + pix, x_c], [255, 255, 255])) and not is_gotten["down"] and (y_c - pix) > 0:
+            status["down"] = (pix, image[y_c + pix, x_c])
+            is_gotten["down"] = True
+
+        if np.any(np.not_equal(image[y_c, x_c + pix], [255, 255, 255])) and not is_gotten["right"]:
+            status["right"] = (pix, image[y_c, x_c + pix])
+            is_gotten["right"] = True
+
+        if np.any(np.not_equal(image[y_c, x_c - pix], [255, 255, 255])) and not is_gotten["left"] and (x_c - pix) > 0:
+            status["left"] = (pix, image[y_c, x_c - pix])
+            is_gotten["left"] = True
+
+    return status
 
 
 def FindWayFromMaze(image: np.ndarray) -> tuple[list[int], list[int]]:
+    # -> list[tuple[list[int], list[int]] | np.ndarray]:
     """
     Находит путь через лабиринт.
 
@@ -99,28 +187,51 @@ def FindWayFromMaze(image: np.ndarray) -> tuple[list[int], list[int]]:
         tuple: координаты пути из лабиринта в виде (x, y), где x и y - это массивы координат.
     """
 
-    image = FloodFillFromPoint(image, (0, 0), (0, 255, 0))
-
     x_list: list[int] = []
     y_list: list[int] = []
+
+    def AddPointToAnswer(point: tuple[int, int]):
+        x_list.append(point[0])
+        y_list.append(point[1])
+
+    cell_size = GetMazeCellSize(image)
+
+    image = FloodFillFromPoint(image, (0, 0), (0, 255, 0))
+    grid_image = AddGrid(image, step_size=cell_size, line_thickness=2, line_color=(100, 100, 100))
 
     h, w, _ = image.shape
 
     entry_point, exit_point = FindMazeEntryAndExit(image)
 
-    image[entry_point] = [0, 0, 255]
-    image[exit_point] = [0, 0, 255]
+    AddPointToAnswer(entry_point)
 
-    x_list.append(entry_point[0])
-    y_list.append(entry_point[1])
+    # очевидно, что первой точкой после входа будет поход вниз:
+    first_point = GetCenterOfMazeCell((entry_point[0], 4), cell_size)
+    AddPointToAnswer(first_point)
 
-    for i in range(h):
-        for j in range(w):
-            pass
+    # предпоследней точкой будет верх от выхода:
+    last_point = GetCenterOfMazeCell((exit_point[0], h - 4), cell_size)
 
-    x_list.append(exit_point[0])
-    y_list.append(exit_point[1])
+    curr_point = first_point
+    while (curr_point != last_point):
+        curr_status = GetPositionStatus(image, curr_point, cell_size)
+        print(curr_point)
+        print(curr_status)
+        break
 
-    image = FloodFillFromPoint(image, (0, 0), (0, 0, 0))
+    AddPointToAnswer(last_point)
+    AddPointToAnswer(exit_point)
+
+    # image = FloodFillFromPoint(image, (0, 0), (0, 0, 0))
+
+    # return [(x_list, y_list), image]
+
+    print()
+
+    print(GetPositionStatus(image, (5, 5)))
+    print(GetPositionStatus(image, (5, h - 5)))
+
+    print(GetPositionStatus(image, (w - 5, 5)))
+    print(GetPositionStatus(image, (w - 5, h - 5)))
 
     return (x_list, y_list)
