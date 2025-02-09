@@ -1,5 +1,17 @@
 import cv2
 import numpy as np
+import enum
+
+
+class WallType(enum.Enum):
+    NO_WALL = 0
+    GREEN = 1
+    BLACK = 2
+
+
+WHITE = [255, 255, 255]
+BLACK = [0, 0, 0]
+GREEN = [0, 255, 0]
 
 
 def FindMazeEntryAndExit(image: np.ndarray) -> tuple[tuple[int, int], tuple[int, int]]:
@@ -34,7 +46,7 @@ def FindMazeEntryAndExit(image: np.ndarray) -> tuple[tuple[int, int], tuple[int,
         """
 
         white_pixels = np.where(
-            np.all(image[row_index] == [255, 255, 255], axis=1))[0]
+            np.all(image[row_index] == WHITE, axis=1))[0]
 
         if len(white_pixels) == 0:
             return []
@@ -113,70 +125,87 @@ def AddGrid(image: np.ndarray, step_size: int,
 
 def GetMazeCellSize(image: np.ndarray) -> int:
     # кол-во белых пикселей на входе + 2
-    return len(np.where(np.all(image[0] == [255, 255, 255], axis=1))[0]) + 2
+    return len(np.where(np.all(image[0] == WHITE, axis=1))[0]) + 2
 
 
 def GetCenterOfMazeCell(point: tuple[int, int],
                         maze_cell_size: int) -> tuple[int, int]:
     x, y = point
 
-    cell_x = (x // maze_cell_size) * maze_cell_size
-    cell_y = (y // maze_cell_size) * maze_cell_size
-
-    center_x = cell_x + maze_cell_size // 2
-    center_y = cell_y + maze_cell_size // 2
-
-    return (center_x, center_y)
+    return ((x // maze_cell_size) * maze_cell_size + maze_cell_size // 2,
+            (y // maze_cell_size) * maze_cell_size + maze_cell_size // 2)
 
 
-def GetPositionStatus(image: np.ndarray,
-                      point: tuple[int, int],
-                      maze_cell_size: int = 0  # 0 - неизвестна
-                      ) -> dict[str, tuple[int, list[int]]]:
+def GetWallStatusFromPoint(point: tuple[int, int], image: np.ndarray,
+                           maze_cell_size: int = 0  # 0 - неизвестна
+                           ) -> dict[str, tuple[tuple[int, int] | None, WallType]]:
+
     if not maze_cell_size:
         maze_cell_size = GetMazeCellSize(image)
 
-    c_point = GetCenterOfMazeCell(point, maze_cell_size)
-    x_c, y_c = c_point
+    x_c, y_c = GetCenterOfMazeCell(point, maze_cell_size)
 
-    print(x_c, y_c)
+    offset = maze_cell_size - 2
 
-    status = {
-        "up": (0, [255, 255, 255]),      # (int, color)
-        "down": (0, [255, 255, 255]),    # (int, color)
-        "right": (0, [255, 255, 255]),   # (int, color)
-        "left": (0, [255, 255, 255])     # (int, color)
+    def GetNeighbor(dx, dy):
+        if x_c + dx > 0 and y_c + dy > 0:
+            return GetCenterOfMazeCell((x_c + dx, y_c + dy), maze_cell_size)
+
+        else:
+            return None
+
+    wall_status = {
+        # (center(point), color)
+        "down": (GetNeighbor(0, offset),
+                 WallType.NO_WALL),
+
+        "up": (GetNeighbor(0, -offset),
+               WallType.NO_WALL),
+
+        "right": (GetNeighbor(offset, 0),
+                  WallType.NO_WALL),
+
+        "left": (GetNeighbor(-offset, 0),
+                 WallType.NO_WALL)
     }
 
     is_gotten = {
-        "up": False,
         "down": False,
+        "up": False,
         "right": False,
         "left": False
     }
 
-    for pix in range(maze_cell_size // 2 + 2):
-        if np.any(np.not_equal(image[y_c - pix, x_c], [255, 255, 255])) and not is_gotten["up"]:
-            status["up"] = (pix, image[y_c - pix, x_c])
-            is_gotten["up"] = True
+    def GetWallTypeFromColor(color: list[int]):
+        if np.all(np.equal(color, BLACK)):
+            return WallType.BLACK
 
-        if np.any(np.not_equal(image[y_c + pix, x_c], [255, 255, 255])) and not is_gotten["down"] and (y_c - pix) > 0:
-            status["down"] = (pix, image[y_c + pix, x_c])
+        elif np.all(np.equal(color, GREEN)):
+            return WallType.GREEN
+
+        return WallType.NO_WALL
+
+    for pix in range(1, offset):
+        if np.any(np.not_equal(image[y_c + pix, x_c], WHITE)) and not is_gotten["down"]:
+            wall_status["down"] = ((x_c, y_c + pix), GetWallTypeFromColor(image[y_c + pix, x_c]))
             is_gotten["down"] = True
 
-        if np.any(np.not_equal(image[y_c, x_c + pix], [255, 255, 255])) and not is_gotten["right"]:
-            status["right"] = (pix, image[y_c, x_c + pix])
+        if np.any(np.not_equal(image[y_c - pix, x_c], WHITE)) and not is_gotten["up"] and (y_c - pix) > 0:
+            wall_status["up"] = ((x_c, y_c - pix), GetWallTypeFromColor(image[y_c - pix, x_c]))
+            is_gotten["up"] = True
+
+        if np.any(np.not_equal(image[y_c, x_c + pix], WHITE)) and not is_gotten["right"]:
+            wall_status["right"] = ((x_c + pix, y_c), GetWallTypeFromColor(image[y_c, x_c + pix]))
             is_gotten["right"] = True
 
-        if np.any(np.not_equal(image[y_c, x_c - pix], [255, 255, 255])) and not is_gotten["left"] and (x_c - pix) > 0:
-            status["left"] = (pix, image[y_c, x_c - pix])
+        if np.any(np.not_equal(image[y_c, x_c - pix], WHITE)) and not is_gotten["left"] and (x_c - pix) > 0:
+            wall_status["left"] = ((x_c - pix, y_c), GetWallTypeFromColor(image[y_c, x_c - pix]))
             is_gotten["left"] = True
 
-    return status
+    return wall_status
 
 
 def FindWayFromMaze(image: np.ndarray) -> tuple[list[int], list[int]]:
-    # -> list[tuple[list[int], list[int]] | np.ndarray]:
     """
     Находит путь через лабиринт.
 
@@ -187,51 +216,58 @@ def FindWayFromMaze(image: np.ndarray) -> tuple[list[int], list[int]]:
         tuple: координаты пути из лабиринта в виде (x, y), где x и y - это массивы координат.
     """
 
-    x_list: list[int] = []
-    y_list: list[int] = []
-
-    def AddPointToAnswer(point: tuple[int, int]):
-        x_list.append(point[0])
-        y_list.append(point[1])
+    answer: list[tuple[int, int]] = []
 
     cell_size = GetMazeCellSize(image)
 
-    image = FloodFillFromPoint(image, (0, 0), (0, 255, 0))
-    grid_image = AddGrid(image, step_size=cell_size, line_thickness=2, line_color=(100, 100, 100))
+    image = FloodFillFromPoint(image, (0, 0), tuple(GREEN))  # type: ignore
+    # grid_image = AddGrid(image, step_size=cell_size, line_thickness=2, line_color=(100, 100, 100))
 
-    h, w, _ = image.shape
+    h, _, _ = image.shape
 
     entry_point, exit_point = FindMazeEntryAndExit(image)
 
-    AddPointToAnswer(entry_point)
+    answer.append(entry_point)
 
     # очевидно, что первой точкой после входа будет поход вниз:
     first_point = GetCenterOfMazeCell((entry_point[0], 4), cell_size)
-    AddPointToAnswer(first_point)
+    answer.append(first_point)
 
     # предпоследней точкой будет верх от выхода:
     last_point = GetCenterOfMazeCell((exit_point[0], h - 4), cell_size)
 
+    def GetNeighbors(point: tuple[int, int]) -> dict[str, tuple[int, int] | None]:
+        res: dict[str, tuple[int, int] | None] = {
+            "down": None,
+            "up": None,
+            "right": None,
+            "left": None
+        }
+
+        status = GetWallStatusFromPoint(point, image, cell_size)
+
+        for direction, point_wall in status.items():
+            p, w = point_wall
+            if w == WallType.NO_WALL:
+                res[direction] = p
+
+        return res
+
+    i = 0
     curr_point = first_point
     while (curr_point != last_point):
-        curr_status = GetPositionStatus(image, curr_point, cell_size)
         print(curr_point)
-        print(curr_status)
-        break
+        print(GetWallStatusFromPoint(curr_point, image, cell_size))
+        print(GetNeighbors(curr_point))
 
-    AddPointToAnswer(last_point)
-    AddPointToAnswer(exit_point)
+        i += 1
+        print("i: ", i)
+        if i == 1:
+            break
 
-    # image = FloodFillFromPoint(image, (0, 0), (0, 0, 0))
+    answer.append(last_point)
+    answer.append(exit_point)
 
-    # return [(x_list, y_list), image]
+    print(answer)
 
-    print()
-
-    print(GetPositionStatus(image, (5, 5)))
-    print(GetPositionStatus(image, (5, h - 5)))
-
-    print(GetPositionStatus(image, (w - 5, 5)))
-    print(GetPositionStatus(image, (w - 5, h - 5)))
-
-    return (x_list, y_list)
+    return ([x for x, _ in answer], [y for _, y in answer])
