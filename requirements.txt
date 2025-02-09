@@ -3,4 +3,7 @@ scikit-learn
 jupyterlab
 matplotlib
 numpy
-opencv-python==4.3.0.36
+opencv-python
+# ==4.3.0.36
+pytest
+ipykernel
