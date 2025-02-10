@@ -137,11 +137,23 @@ def GetMazeCellSize(image: np.ndarray) -> int:
 
 
 def GetCenterOfMazeCell(point: tuple[int, int],
-                        maze_cell_size: int) -> tuple[int, int]:
+                        image: np.ndarray,
+                        maze_cell_size: int = 0  # 0 - неизвестно
+                        ) -> tuple[int, int]:
+    if not maze_cell_size:
+        maze_cell_size = GetMazeCellSize(image)
+
+    h, w, _ = image.shape
+
     x, y = point
 
-    return ((x // maze_cell_size) * maze_cell_size + maze_cell_size // 2,
-            (y // maze_cell_size) * maze_cell_size + maze_cell_size // 2)
+    cell_x = (x // maze_cell_size) * maze_cell_size + maze_cell_size // 2
+    cell_x = min(cell_x, w - 2)
+
+    cell_y = (y // maze_cell_size) * maze_cell_size + maze_cell_size // 2
+    cell_y = min(h - 2, cell_y)
+
+    return (cell_x, cell_y)
 
 
 def GetWallStatusFromPoint(point: tuple[int, int], image: np.ndarray,
@@ -151,13 +163,12 @@ def GetWallStatusFromPoint(point: tuple[int, int], image: np.ndarray,
     if not maze_cell_size:
         maze_cell_size = GetMazeCellSize(image)
 
-    x_c, y_c = GetCenterOfMazeCell(point, maze_cell_size)
-
+    x_c, y_c = GetCenterOfMazeCell(point, image, maze_cell_size)
     offset = maze_cell_size - 2
 
     def GetNeighbor(dx, dy):
         if x_c + dx > 0 and y_c + dy > 0:
-            return GetCenterOfMazeCell((x_c + dx, y_c + dy), maze_cell_size)
+            return GetCenterOfMazeCell((x_c + dx, y_c + dy), image, maze_cell_size)
 
         else:
             return None
@@ -195,30 +206,30 @@ def GetWallStatusFromPoint(point: tuple[int, int], image: np.ndarray,
 
         return WallType.NO_WALL
 
-    for pix in range(1, maze_cell_size // 2 + 2):
-        if np.any(np.not_equal(image[y_c + pix, x_c], WHITE)) and\
-                not is_gotten[Direction.DOWN]:
-            wall_status[Direction.DOWN] = (
-                (x_c, y_c + pix), GetWallTypeFromColor(image[y_c + pix, x_c]))
-            is_gotten[Direction.DOWN] = True
+    for pix in range(1, maze_cell_size // 2 + 1):
+        if not is_gotten[Direction.DOWN]:
+            if np.any(np.not_equal(image[y_c + pix, x_c], WHITE)):
+                wall_status[Direction.DOWN] = (
+                    (x_c, y_c + pix - 1), GetWallTypeFromColor(image[y_c + pix, x_c]))
+                is_gotten[Direction.DOWN] = True
 
-        if np.any(np.not_equal(image[y_c - pix, x_c], WHITE)) and\
-                not is_gotten[Direction.UP] and (y_c - pix) > 0:
-            wall_status[Direction.UP] = (
-                (x_c, y_c - pix), GetWallTypeFromColor(image[y_c - pix, x_c]))
-            is_gotten[Direction.UP] = True
+        if not is_gotten[Direction.UP] and (y_c - pix) > 0:
+            if np.any(np.not_equal(image[y_c - pix, x_c], WHITE)):
+                wall_status[Direction.UP] = (
+                    (x_c, y_c - pix + 1), GetWallTypeFromColor(image[y_c - pix, x_c]))
+                is_gotten[Direction.UP] = True
 
-        if np.any(np.not_equal(image[y_c, x_c - pix], WHITE)) and\
-                not is_gotten[Direction.LEFT] and (x_c - pix) > 0:
-            wall_status[Direction.LEFT] = (
-                (x_c - pix, y_c), GetWallTypeFromColor(image[y_c, x_c - pix]))
-            is_gotten[Direction.LEFT] = True
+        if not is_gotten[Direction.LEFT] and (x_c - pix) > 0:
+            if np.any(np.not_equal(image[y_c, x_c - pix], WHITE)):
+                wall_status[Direction.LEFT] = (
+                    (x_c - pix + 1, y_c), GetWallTypeFromColor(image[y_c, x_c - pix]))
+                is_gotten[Direction.LEFT] = True
 
-        if np.any(np.not_equal(image[y_c, x_c + pix], WHITE)) and\
-                not is_gotten[Direction.RIGHT]:
-            wall_status[Direction.RIGHT] = (
-                (x_c + pix, y_c), GetWallTypeFromColor(image[y_c, x_c + pix]))
-            is_gotten[Direction.RIGHT] = True
+        if not is_gotten[Direction.RIGHT]:
+            if np.any(np.not_equal(image[y_c, x_c + pix], WHITE)):
+                wall_status[Direction.RIGHT] = (
+                    (x_c + pix - 1, y_c), GetWallTypeFromColor(image[y_c, x_c + pix]))
+                is_gotten[Direction.RIGHT] = True
 
     return wall_status
 
@@ -248,10 +259,10 @@ def FindWayFromMaze(image: np.ndarray) -> tuple[list[int], list[int]]:
     answer.append(entry_point)
 
     # очевидно, что первой точкой после входа будет поход вниз:
-    first_point = GetCenterOfMazeCell((entry_point[0], 4), cell_size)
+    first_point = GetCenterOfMazeCell((entry_point[0], 4), image, cell_size)
 
     # предпоследней точкой будет верх от выхода:
-    last_point = GetCenterOfMazeCell((exit_point[0], h - 4), cell_size)
+    last_point = GetCenterOfMazeCell((exit_point[0], h - 4), image, cell_size)
 
     def GetNeighbors(point: tuple[int, int]) -> dict[Direction, tuple[int, int] | None]:
         res: dict[Direction, tuple[int, int] | None] = {
@@ -270,11 +281,16 @@ def FindWayFromMaze(image: np.ndarray) -> tuple[list[int], list[int]]:
 
         return res
 
-    def IsPointPositionAccordedToWallDirection(point: tuple[int, int],
-                                               direction: Direction,
-                                               curr_wall_type: WallType) -> bool:
-        def CalcWallDirection(direction: Direction, curr_wall_type: WallType) -> Direction:
-            match curr_wall_type:
+    def IsAcceptedNeighbor(point: tuple[int, int],
+                           direction: Direction) -> bool:
+        print()
+        print()
+
+        print("IsAcceptedNeighbor: ", point, direction)
+
+        def CalcWallDirection(direction: Direction,
+                              wall_type: WallType) -> Direction:
+            match wall_type:
                 case WallType.GREEN:
                     match direction:
                         case Direction.DOWN:
@@ -299,23 +315,63 @@ def FindWayFromMaze(image: np.ndarray) -> tuple[list[int], list[int]]:
 
             return Direction.UP
 
-        wall_direction = CalcWallDirection(direction, curr_wall_type)
+        walls_direction = {
+            WallType.GREEN: CalcWallDirection(direction, WallType.GREEN),
+            WallType.BLACK: CalcWallDirection(direction, WallType.BLACK)
+        }
+
         wall_status = GetWallStatusFromPoint(point, image, cell_size)
 
-        for neigh_direction in wall_status.keys():
-            if neigh_direction == wall_direction:
-                if wall_status[neigh_direction][1] == curr_wall_type:
-                    return True
-                elif wall_status[neigh_direction][1] != WallType.NO_WALL:
-                    # print(wall_status[neigh_direction][1].name)
-                    # print(" point: ", point)
-                    # print(" curr_dir: ", neigh_direction,
-                    #       "\n wall_dir: ", wall_direction,
-                    #       "\n wall_type: ", curr_wall_type,
-                    #       "\n curr_type: ", wall_status[neigh_direction][1])
-                    return False
+        bool_dict = {
+            WallType.GREEN: False,
+            WallType.BLACK: False
+        }
 
-        return True
+        for neigh_direction in wall_status.keys():
+            for wall_type, wall_dir in walls_direction.items():
+                if neigh_direction == wall_dir:
+                    if wall_status[wall_dir][1] == wall_type:
+                        print(True, wall_type)
+                        bool_dict[wall_type] = True
+                        break
+
+                    elif wall_status[wall_dir][1] == WallType.NO_WALL:
+                        temp_wall_status = wall_status.copy()
+
+                        while (True):  # пока не найдем стенку соседа в том же направлении
+                            next_neigh = temp_wall_status[wall_dir][0]
+                            print(point, next_neigh)
+
+                            next_neigh_wall_status = \
+                                GetWallStatusFromPoint(next_neigh, image, cell_size)  # type: ignore
+                            print("neigh_neigh_GetWallStatusFromPoint: ",
+                                  next_neigh_wall_status, "\n\t", next_neigh)
+
+                            if next_neigh_wall_status[wall_dir][1] == wall_type:
+                                print("Neigh True", wall_type)
+                                bool_dict[wall_type] = True
+                                break
+
+                            elif temp_wall_status[wall_dir][1] == WallType.NO_WALL:
+                                temp_wall_status = next_neigh_wall_status
+
+                            else:  # стена другого цвета
+                                print(False, wall_type)
+                                bool_dict[wall_type] = False
+                                break
+
+                    else:  # стена другого цвета
+                        print(wall_status[neigh_direction][1].name)
+                        print(" point: ", point)
+                        print(" curr_dir: ", neigh_direction,
+                              "\n wall_dir: ", wall_dir,
+                              "\n wall_type: ", wall_type,
+                              "\n curr_type: ", wall_status[neigh_direction][1])
+                        print(False, wall_type)
+                        bool_dict[wall_type] = False
+                        break
+
+        return bool_dict[WallType.BLACK] and bool_dict[WallType.GREEN]
 
     def GetUniqueNeighbor(neigh_points: dict[Direction, tuple[int, int] | None]) \
             -> tuple[Direction, tuple[int, int]] | Literal[False]:
@@ -329,16 +385,9 @@ def FindWayFromMaze(image: np.ndarray) -> tuple[list[int], list[int]]:
                 count += 1
 
                 if count > 1:
-                    return False  # Нашли второе non-None, сразу выходим
+                    return False  # нашли второе non-None, сразу выходим
 
                 unique_neigh = item  # type: ignore
-
-        # print()
-        # print("GetUniqueNeighbor: ")
-        # print(neigh_points.values())
-        # print(answer)
-        # print(count)
-        # print()
 
         if count == 0:
             return False
@@ -347,40 +396,54 @@ def FindWayFromMaze(image: np.ndarray) -> tuple[list[int], list[int]]:
 
     i = 0
     curr_point = first_point
-
     while (curr_point != last_point):
         answer.append(curr_point)
 
-        # print("i: ", i)
+        print("i: ", i)
 
-        # wall_status = GetWallStatusFromPoint(curr_point, image, cell_size)
+        wall_status = GetWallStatusFromPoint(curr_point, image, cell_size)
         neigh_points = GetNeighbors(curr_point)
         unique_neigh = GetUniqueNeighbor(neigh_points)
 
-        # print("curr:", curr_point)
-        # print("neig:", wall_status)
-        # print("wall:", neigh_points)
-        # print("uniq:", unique_neigh)
+        print("curr:", curr_point)
+        print("neig:", wall_status)
+        print("wall:", neigh_points)
+        print("uniq:", unique_neigh)
+        print("answ:", answer)
+
+        prev_point = curr_point
 
         if unique_neigh:
             _, curr_point = unique_neigh
 
-        for direction, neigh_point in neigh_points.items():
-            if neigh_point and neigh_point not in answer:
-                if IsPointPositionAccordedToWallDirection(neigh_point, direction, WallType.GREEN) and\
-                        IsPointPositionAccordedToWallDirection(neigh_point, direction, WallType.BLACK):
-                    curr_point = neigh_point
+        if prev_point == curr_point:
+            for direction, neigh_point in neigh_points.items():
+                if neigh_point and neigh_point not in answer:
+                    if IsAcceptedNeighbor(neigh_point, direction):
+                        curr_point = neigh_point
+                        break
+
+        if prev_point == curr_point:
+            print("NEIGH_NEIGH")
+            for _, neigh_point in neigh_points.items():
+                if neigh_point and neigh_point not in answer:
+                    neigh_neigh_points = GetNeighbors(neigh_point)
+
+                    for neigh_direction, neigh_neigh_point in neigh_neigh_points.items():
+                        if neigh_neigh_point and neigh_neigh_point not in answer:
+                            if IsAcceptedNeighbor(neigh_neigh_point, neigh_direction):
+                                curr_point = neigh_point
+                                break
 
         i += 1
-        # print()
-        # print()
-        if i == 80:
+        print()
+        print()
+        if i == 160:
             break
 
     answer.append(last_point)
     answer.append(exit_point)
 
-    # print(direction_list)
     # print(answer)
 
     return ([x for x, _ in answer], [y for _, y in answer])

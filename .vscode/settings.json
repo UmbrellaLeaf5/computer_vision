@@ -3,6 +3,7 @@
     "imread",
     "imshow",
     "ndarray",
+    "neig",
     "отрисованными"
   ]
 }
