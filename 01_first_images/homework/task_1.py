@@ -283,10 +283,6 @@ def FindWayFromMaze(image: np.ndarray) -> tuple[list[int], list[int]]:
 
     def IsAcceptedNeighbor(point: tuple[int, int],
                            direction: Direction) -> bool:
-        print()
-        print()
-
-        print("IsAcceptedNeighbor: ", point, direction)
 
         def CalcWallDirection(direction: Direction,
                               wall_type: WallType) -> Direction:
@@ -331,44 +327,29 @@ def FindWayFromMaze(image: np.ndarray) -> tuple[list[int], list[int]]:
             for wall_type, wall_dir in walls_direction.items():
                 if neigh_direction == wall_dir:
                     if wall_status[wall_dir][1] == wall_type:
-                        print(True, wall_type)
                         bool_dict[wall_type] = True
                         break
 
                     elif wall_status[wall_dir][1] == WallType.NO_WALL:
-                        temp_wall_status = wall_status.copy()
+                        copy_wall_status = wall_status.copy()
 
                         while (True):  # пока не найдем стенку соседа в том же направлении
-                            next_neigh = temp_wall_status[wall_dir][0]
-                            print(point, next_neigh)
+                            next_neigh = copy_wall_status[wall_dir][0]
 
                             next_neigh_wall_status = \
                                 GetWallStatusFromPoint(next_neigh, image, cell_size)  # type: ignore
-                            print("neigh_neigh_GetWallStatusFromPoint: ",
-                                  next_neigh_wall_status, "\n\t", next_neigh)
 
                             if next_neigh_wall_status[wall_dir][1] == wall_type:
-                                print("Neigh True", wall_type)
                                 bool_dict[wall_type] = True
                                 break
 
-                            elif temp_wall_status[wall_dir][1] == WallType.NO_WALL:
-                                temp_wall_status = next_neigh_wall_status
+                            elif copy_wall_status[wall_dir][1] == WallType.NO_WALL:
+                                copy_wall_status = next_neigh_wall_status
 
                             else:  # стена другого цвета
-                                print(False, wall_type)
-                                bool_dict[wall_type] = False
                                 break
 
                     else:  # стена другого цвета
-                        print(wall_status[neigh_direction][1].name)
-                        print(" point: ", point)
-                        print(" curr_dir: ", neigh_direction,
-                              "\n wall_dir: ", wall_dir,
-                              "\n wall_type: ", wall_type,
-                              "\n curr_type: ", wall_status[neigh_direction][1])
-                        print(False, wall_type)
-                        bool_dict[wall_type] = False
                         break
 
         return bool_dict[WallType.BLACK] and bool_dict[WallType.GREEN]
@@ -394,22 +375,13 @@ def FindWayFromMaze(image: np.ndarray) -> tuple[list[int], list[int]]:
         else:
             return unique_neigh
 
-    i = 0
     curr_point = first_point
     while (curr_point != last_point):
         answer.append(curr_point)
 
-        print("i: ", i)
-
         wall_status = GetWallStatusFromPoint(curr_point, image, cell_size)
         neigh_points = GetNeighbors(curr_point)
         unique_neigh = GetUniqueNeighbor(neigh_points)
-
-        print("curr:", curr_point)
-        print("neig:", wall_status)
-        print("wall:", neigh_points)
-        print("uniq:", unique_neigh)
-        print("answ:", answer)
 
         prev_point = curr_point
 
@@ -424,7 +396,6 @@ def FindWayFromMaze(image: np.ndarray) -> tuple[list[int], list[int]]:
                         break
 
         if prev_point == curr_point:
-            print("NEIGH_NEIGH")
             for _, neigh_point in neigh_points.items():
                 if neigh_point and neigh_point not in answer:
                     neigh_neigh_points = GetNeighbors(neigh_point)
@@ -435,15 +406,7 @@ def FindWayFromMaze(image: np.ndarray) -> tuple[list[int], list[int]]:
                                 curr_point = neigh_point
                                 break
 
-        i += 1
-        print()
-        print()
-        if i == 160:
-            break
-
     answer.append(last_point)
     answer.append(exit_point)
-
-    # print(answer)
 
     return ([x for x, _ in answer], [y for _, y in answer])
