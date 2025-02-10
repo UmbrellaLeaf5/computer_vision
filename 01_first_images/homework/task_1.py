@@ -22,6 +22,9 @@ class Direction(enum.Enum):
     RIGHT = 3
 
 
+WallStatus = dict[Direction, tuple[Point | None, WallType]]
+
+
 WHITE = [255, 255, 255]
 BLACK = [0, 0, 0]
 GREEN = [0, 255, 0]
@@ -42,19 +45,21 @@ def FindMazeEntryAndExit(image: np.ndarray) -> tuple[Point, Point]:
 
     h, _, _ = image.shape
 
-    up_endpoints: list[int] = []
-    down_endpoints: list[int] = []
+    up_endpoints: tuple[int, int]
+    down_endpoints: tuple[int, int]
 
-    def FindWhiteEndpointsInRow(image: np.ndarray, row_index: int) -> list[int]:
+    def FindWhiteEndpointsInRow(image: np.ndarray,
+                                row_index: int
+                                ) -> tuple[int, int]:
         """
-        Находит x-координаты первой и последней белой пикселей в заданной строке.
+        Находит x-координаты первого и последнего белых пикселей в заданной строке.
 
         Args:
             image (np.ndarray): изображение (матрица цветов) лабиринта.
             row_index (int): индекс строки для поиска.
 
         Returns:
-            list[int]: список x-координат первой и последней белых пикселей.
+            tuple[int, int]: кортеж x-координат первого и последнего белых пикселей.
             (возвращает пустой список, если белые пиксели не найдены)
         """
 
@@ -62,8 +67,8 @@ def FindMazeEntryAndExit(image: np.ndarray) -> tuple[Point, Point]:
             np.all(image[row_index] == WHITE, axis=1))[0]
 
         if len(white_pixels) == 0:
-            return []
-        return [white_pixels[0], white_pixels[-1]]
+            return (0, 0)
+        return (white_pixels[0], white_pixels[-1])
 
     up_endpoints = FindWhiteEndpointsInRow(image, 0)
     down_endpoints = FindWhiteEndpointsInRow(image, h - 1)
@@ -77,8 +82,10 @@ def FindMazeEntryAndExit(image: np.ndarray) -> tuple[Point, Point]:
     return ((entry_x, 0), (exit_x, h - 1))
 
 
-def FloodFillFromPoint(image: np.ndarray, point: Point,
-                       color: ColorTuple) -> np.ndarray:
+def FloodFillFromPoint(image: np.ndarray,
+                       point: Point,
+                       color: ColorTuple
+                       ) -> np.ndarray:
     """
     Выполняет заливку области (flood fill) на изображении, начиная с указанной точки.
 
@@ -116,14 +123,39 @@ def FloodFillFromPoint(image: np.ndarray, point: Point,
 
 
 def GetMazeCellSize(image: np.ndarray) -> int:
+    """
+    Определяет размер ячейки лабиринта.
+    (на основе количества белых пикселей в первой строке изображения)
+
+    Args:
+        image (np.ndarray): изображение (матрица цветов) лабиринта.
+
+    Returns:
+        int: размер ячейки лабиринта в пикселях.
+    """
+
     # кол-во белых пикселей на входе + 2
     return len(np.where(np.all(image[0] == WHITE, axis=1))[0]) + 2
 
 
 def GetCenterOfMazeCell(point: Point,
                         image: np.ndarray,
-                        maze_cell_size: int = 0  # 0 - неизвестно
+                        maze_cell_size: int = 0
                         ) -> Point:
+    """
+    Определяет координаты центра ячейки лабиринта.
+
+    Args:
+        point (Point): координаты точки внутри ячейки.
+        image (np.ndarray): изображение (матрица цветов) лабиринта.
+        maze_cell_size (int, optional): размер ячейки лабиринта.
+                                        (если не указан, вычисляется автоматически)
+                                        Defaults to 0.
+
+    Returns:
+        Point: координаты центра ячейки.
+    """
+
     if not maze_cell_size:
         maze_cell_size = GetMazeCellSize(image)
 
@@ -138,8 +170,29 @@ def GetCenterOfMazeCell(point: Point,
 
 def GetWallStatus(point: Point,
                   image: np.ndarray,
-                  maze_cell_size: int = 0  # 0 - неизвестна
-                  ) -> dict[Direction, tuple[Point | None, WallType]]:
+                  maze_cell_size: int = 0
+                  ) -> WallStatus:
+    """
+    Определяет статус стен вокруг заданной точки в лабиринте.
+
+    Для каждого направления (вверх, вниз, влево, вправо) функция определяет,
+    есть ли стена, и если есть, то какого она типа (черная или зеленая).
+
+    Args:
+        point (Point): координаты точки, для которой определяется статус стен.
+        image (np.ndarray): изображение (матрица цветов) лабиринта.
+        maze_cell_size (int, optional): размер ячейки лабиринта.
+                                        (если не указан, вычисляется автоматически)
+                                        Defaults to 0.
+
+    Returns:
+        WallStatus: словарь, где 
+        ключи - это направления (`Direction`), 
+        значения - кортежи, содержащие координаты пикселя стены (`Point`) и тип стены (`WallType`).
+
+        Если в данном направлении стены нет, то координата пикселя равна `None`, а тип стены `WallType.NO_WALL`.
+    """
+
     if not maze_cell_size:
         maze_cell_size = GetMazeCellSize(image)
 
@@ -147,7 +200,23 @@ def GetWallStatus(point: Point,
     offset = maze_cell_size - 2
     h, w, _ = image.shape
 
-    def GetNeighbor(dx, dy) -> Point | None:
+    def GetNeighbor(dx: int,
+                    dy: int
+                    ) -> Point | None:
+        """
+        Возвращает координаты соседней ячейки.
+
+        Вычисляет координаты соседней ячейки, смещенной на (dx, dy) от текущей,
+        и возвращает центр этой ячейки.
+
+        Args:
+            dx (int): смещение по оси x.
+            dy (int): смещение по оси y.
+
+        Returns:
+            OPoint | None: координаты центра соседней ячейки, или None, если соседняя ячейка находится за пределами изображения.
+        """
+
         if x_c + dx > 0 and y_c + dy > 0:
             return GetCenterOfMazeCell((x_c + dx, y_c + dy), image, maze_cell_size)
         else:
@@ -161,6 +230,16 @@ def GetWallStatus(point: Point,
     }
 
     def GetWallTypeFromColor(color: ColorList) -> WallType:
+        """
+        Определяет тип стены на основе её цвета.
+
+        Args:
+            color (ColorList): цвет пикселя стены.
+
+        Returns:
+            WallType: тип стены (черная, зеленая, отсутствие стены).
+        """
+
         if np.all(np.equal(color, BLACK)):
             return WallType.BLACK
 
@@ -223,6 +302,21 @@ def FindMazePath(image: np.ndarray) -> tuple[list[int], list[int]]:
     last_point = GetCenterOfMazeCell((exit_point[0], h - 4), image, cell_size)
 
     def GetNeighbors(point: Point) -> dict[Direction, Point | None]:
+        """
+        Определяет соседние ячейки для заданной точки.
+
+        Для каждой ячейки возвращает её соседа в каждом из четырех направлений 
+        (вверх, вниз, влево, вправо),
+        если этот сосед существует и не является стеной.
+
+        Args:
+            point (Point): координаты ячейки, для которой нужно найти соседей.
+
+        Returns:
+            dict[Direction, Point | None]: словарь, где ключи - это направления (`Direction`),
+            а значения - координаты соседней ячейки (`Point`) или None, если сосед отсутствует.
+        """
+
         res: dict[Direction, Point | None] = {
             Direction.DOWN: None,
             Direction.UP: None,
@@ -240,9 +334,35 @@ def FindMazePath(image: np.ndarray) -> tuple[list[int], list[int]]:
         return res
 
     def IsAcceptedNeighbor(point: Point,
-                           direction: Direction) -> bool:
+                           direction: Direction
+                           ) -> bool:
+        """
+        Определяет, является ли соседняя ячейка "приемлемой" для включения в путь.
 
-        def CalcWallDirection(wall_type: WallType) -> Direction:
+        Ячейка считается приемлемой, если она находится рядом с зеленой и черной стенами
+        в определенных направлениях относительно направления движения.
+        (зеленая - всегда справа, черная - всегда слева)
+
+        Args:
+            point (Point): координаты соседней ячейки.
+            direction (Direction): направление движения к этой ячейке.
+
+        Returns:
+            bool: True, если соседняя ячейка приемлема, иначе False.
+        """
+
+        def GetWallDirection(wall_type: WallType) -> Direction:
+            """
+            Вычисляет направление, в котором должна находиться стена,
+            в зависимости от типа стены и направления движения.
+
+            Args:
+                wall_type (WallType): тип стены (зеленая или черная).
+
+            Returns:
+                Direction: направление, в котором должна находиться стена.
+            """
+
             # autopep8: off
             match wall_type:
                 case WallType.GREEN:
@@ -263,15 +383,27 @@ def FindMazePath(image: np.ndarray) -> tuple[list[int], list[int]]:
 
         wall_status = GetWallStatus(point, image, cell_size)
 
-        green_wall_dir = CalcWallDirection(WallType.GREEN)
-        black_wall_dir = CalcWallDirection(WallType.BLACK)
+        green_wall_dir = GetWallDirection(WallType.GREEN)
+        black_wall_dir = GetWallDirection(WallType.BLACK)
 
-        def CheckWallType(wall_dir: Direction,
-                          target_wall_type: WallType) -> bool:
+        def IsAcceptedWallType(wall_dir: Direction,
+                               wall_type: WallType
+                               ) -> bool:
+            """
+            Проверяет, есть ли стена заданного типа в указанном направлении.
+
+            Args:
+                wall_dir (Direction): направление, в котором нужно проверить наличие стены.
+                wall_type (WallType): тип стены, который нужно проверить (зеленая или черная).
+
+            Returns:
+                bool: True, если стена заданного типа есть в указанном направлении, иначе False.
+            """
+
             current_status = wall_status
 
             while True:
-                if current_status[wall_dir][1] == target_wall_type:
+                if current_status[wall_dir][1] == wall_type:
                     return True
                 elif current_status[wall_dir][1] == WallType.NO_WALL:
                     next_neighbor = current_status[wall_dir][0]
@@ -280,11 +412,21 @@ def FindMazePath(image: np.ndarray) -> tuple[list[int], list[int]]:
                 else:
                     return False  # стена другого цвета
 
-        return CheckWallType(green_wall_dir, WallType.GREEN) and\
-            CheckWallType(black_wall_dir, WallType.BLACK)
+        return IsAcceptedWallType(green_wall_dir, WallType.GREEN) and\
+            IsAcceptedWallType(black_wall_dir, WallType.BLACK)
 
-    def GetUniqueNeighbor(neighbors: dict[Direction, Point | None]) \
+    def FindUniqueNeighbor(neighbors: dict[Direction, Point | None]) \
             -> Point | Literal[False]:
+        """
+        Находит уникального соседа (если он есть) среди заданных соседей.
+
+        Уникальным считается сосед, который является единственным возможным следующим шагом.
+        (т.е., имеет только одного соседа, который еще не включен в путь)
+
+        Returns:
+            Point | Literal[False]: координаты уникального соседа, если он есть, иначе False.
+        """
+
         unique_neighbor: Point | Literal[False] = False
 
         count = 0
@@ -304,6 +446,21 @@ def FindMazePath(image: np.ndarray) -> tuple[list[int], list[int]]:
             return unique_neighbor
 
     def GetNextMazePathPoint(current_point: Point) -> Point:
+        """
+        Находит следующую точку пути в лабиринте.
+
+        Ищет следующую точку пути, перебирая соседей текущей точки
+        и выбирая ту, которая является приемлемой (согласно функции IsAcceptedNeighbor)
+        и еще не включена в путь.
+        Если такого соседа нет, то ищет "соседей соседей".
+
+        Args:
+            current_point (Point): координаты текущей точки пути.
+
+        Returns:
+            Point: координаты следующей точки пути.
+        """
+
         neighbors = GetNeighbors(current_point)
 
         # перебор прямых соседей
@@ -326,7 +483,7 @@ def FindMazePath(image: np.ndarray) -> tuple[list[int], list[int]]:
         answer.append(curr_point)
 
         neighbors = GetNeighbors(curr_point)
-        unique_neighbor = GetUniqueNeighbor(neighbors)
+        unique_neighbor = FindUniqueNeighbor(neighbors)
 
         if unique_neighbor:
             curr_point = unique_neighbor
