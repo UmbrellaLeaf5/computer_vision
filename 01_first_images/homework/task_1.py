@@ -275,7 +275,7 @@ def FindMazePath(image: np.ndarray) -> tuple[list[int], list[int]]:
     Находит путь через лабиринт.
 
     Args:
-        image (np.ndarray): изображение (матрица цветов) лабиринта.
+        image (np.ndarray): исходное изображение (матрица цветов) лабиринта.
 
     Returns:
         tuple: координаты пути из лабиринта в виде (x, y), где x и y - это массивы координат.
