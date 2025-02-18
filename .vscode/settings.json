@@ -1,5 +1,7 @@
 {
   "cSpell.words": [
+    "cmap",
+    "figsize",
     "imread",
     "imshow",
     "ndarray",
