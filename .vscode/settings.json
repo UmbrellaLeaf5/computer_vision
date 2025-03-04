@@ -1,12 +1,14 @@
 {
   "cSpell.words": [
     "cmap",
+    "Exepected",
     "figsize",
     "imread",
     "imshow",
     "ndarray",
     "neig",
     "skimage",
+    "subimage",
     "отрисованными",
     "попиксельных"
   ]
