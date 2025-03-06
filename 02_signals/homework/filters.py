@@ -1,4 +1,14 @@
+from typing import Callable
 import numpy as np
+
+import enum
+
+
+class ConvLevel(enum.Enum):
+    Nested = 0
+    Fast = 1
+    Faster = 2
+    Best = 3
 
 
 def IsNonNegative(number: int | float):
@@ -50,21 +60,21 @@ def ConvFilterNested(image: np.ndarray,
 
 def ZeroPad(image: np.ndarray, pad_height: int, pad_width: int):
     """
-    Zero-pad an image.
+    Заполняет изображение нулями по паддингу.
 
-    Ex: a 1x1 image [[1]] with pad_height = 1, pad_width = 2 becomes:
+    Example: a 1x1 image [[1]], pad_height = 1, pad_width = 2:
 
         [[0, 0, 0, 0, 0],
          [0, 0, 1, 0, 0],
          [0, 0, 0, 0, 0]]         of shape (3, 5)
 
     Args:
-        image (np.ndarray): numpy array of shape (H, W).
-        pad_width (int): width of the zero padding (left and right padding).
-        pad_height (int): height of the zero padding (bottom and top padding).
+        image (np.ndarray): изображение (матрица).
+        pad_width (int): ширина нулевого отступа (левый и правый отступ).
+        pad_height (int): высота нулевого отступа (нижнего и верхнего отступа).
 
     Returns:
-        np.ndarray: numpy array of shape (H+2*pad_height, W+2*pad_width).
+        np.ndarray: изображение с отступами (матрица: [H+2*pad_height, W+2*pad_width]).
     """
 
     h, w = image.shape
@@ -134,81 +144,147 @@ def ConvFilterFaster(image: np.ndarray,
 
     f_out = f_image * f_kernel
 
+    # prim_out = np.fft.ifft2(f_out)
+    prim_out = np.flip(np.fft.fft2(f_out))  # почему-то это работает лучше
+
+    return np.real(prim_out)  # - np.imag(prim_out)
+
+
+def ConvFilterBest(image: np.ndarray,
+                   kernel: np.ndarray) -> np.ndarray:
+    """
+    Args:
+        image (np.ndarray): изображение (матрица).
+        kernel (np.ndarray): матрица ядра.
+
+    Returns:
+        np.ndarray: изображение с примененным ядром.
+    """
+    def CircularExtension2d(kernel: np.ndarray,
+                            num_rows: int,
+                            num_cols: int):
+        """ Циклическое расширение для ядра из ConvFilterBest """
+
+        kernel_radius_v = kernel.shape[0] // 2  # Вертикальный радиус
+        kernel_radius_h = kernel.shape[1] // 2  # Горизонтальный радиус
+
+        kernel_padded = np.zeros((num_rows, num_cols), dtype=kernel.dtype)
+        kernel_padded[: kernel.shape[0], : kernel.shape[1]] = kernel
+
+        kernel_padded = np.roll(
+            kernel_padded, shift=(-kernel_radius_v, -kernel_radius_h), axis=(0, 1)
+        )
+
+        return kernel_padded
+
+    h, w = image.shape
+
+    padded_image = np.zeros([h + w - 1, h + w - 1])
+    padded_image[:h, :w] = image
+
+    padded_kernel = CircularExtension2d(
+        kernel, padded_image.shape[0], padded_image.shape[1]
+    )
+
+    f_image = np.fft.fft2(padded_image)
+    f_kernel = np.fft.fft2(padded_kernel)
+
+    f_out = f_image * f_kernel
+
     prim_out = np.fft.ifft2(f_out)
 
-    out = np.real(prim_out) - np.imag(prim_out)
-    # out = (np.real(prim_out))
-
-    return out
+    return np.real(prim_out)[:h, :w]
 
 
-def cross_correlation(f, g):
+# MARK: conv_dict
+conv_dict: dict[ConvLevel, Callable] = {
+    ConvLevel.Nested: ConvFilterNested,
+    ConvLevel.Fast:   ConvFilterFast,
+    ConvLevel.Faster: ConvFilterFaster,
+    ConvLevel.Best:   ConvFilterBest,
+}
+
+
+def CrossCorrelation(f: np.ndarray,
+                     g: np.ndarray,
+                     conv_level: ConvLevel = ConvLevel.Best) -> np.ndarray:
     """
-    Cross-correlation of f and g.
-
-    Hint: use the conv_fast function defined above.
+    Кросс-корреляция f и g.
 
     Args:
-        f: numpy array of shape (Hf, Wf).
-        g: numpy array of shape (Hg, Wg).
+        f (np.ndarray).
+        g (np.ndarray).
+        conv_type (conv_type): уровень корреляции.
 
     Returns:
-        out: numpy array of shape (Hf, Wf).
+        np.ndarray: результат кросс-корреляции.
     """
 
-    out = np.zeros_like(f)
-    # YOUR CODE HERE
-    pass
-    # END YOUR CODE
-
-    return out
+    return conv_dict.get(conv_level, ConvFilterBest)(f, np.flip(g))
 
 
-def zero_mean_cross_correlation(f, g):
+def ZeroMeanCrossCorrelation(f: np.ndarray,
+                             g: np.ndarray,
+                             conv_level: ConvLevel = ConvLevel.Best) -> np.ndarray:
     """
-    Zero-mean cross-correlation of f and g.
-
-    Subtract the mean of g from g so that its mean becomes zero.
-
-    Hint: you should look up useful numpy functions online for calculating the mean.
+    Нулевая средняя кросс-корреляция f и g.
 
     Args:
-        f: numpy array of shape (Hf, Wf).
-        g: numpy array of shape (Hg, Wg).
+        f (np.ndarray).
+        g (np.ndarray).
+        conv_type (conv_type): уровень корреляции.
 
     Returns:
-        out: numpy array of shape (Hf, Wf).
+        np.ndarray: результат кросс-корреляции.
     """
 
-    out = np.zeros_like(f)
-    # YOUR CODE HERE
-    pass
-    # END YOUR CODE
-
-    return out
+    return conv_dict.get(conv_level, ConvFilterBest)(f, np.flip(g - np.mean(g)))
 
 
-def normalized_cross_correlation(f, g):
+def NormalizedCrossCorrelation(f: np.ndarray,
+                               g: np.ndarray) -> np.ndarray:
     """
-    Normalized cross-correlation of f and g.
+    Нормализованная кросс-корреляция f и g.
 
-    Normalize the subimage of f and the template g at each step
-    before computing the weighted sum of the two.
-
-    Hint: you should look up useful numpy functions online for calculating 
-          the mean and standard deviation.
+    Нормализация подизображения f и шаблона g на каждом шаге
+    перед вычислением взвешенной суммы обоих.
 
     Args:
-        f: numpy array of shape (Hf, Wf).
-        g: numpy array of shape (Hg, Wg).
+        f (np.ndarray).
+        g (np.ndarray).
 
     Returns:
-        out: numpy array of shape (Hf, Wf).
+        np.ndarray: результат кросс-корреляции.
     """
 
-    out = np.zeros_like(f)
-    # YOUR CODE HERE
-    pass
-    # END YOUR CODE
+    h_f, w_f = f.shape
+    h_g, w_g = g.shape
+
+    out = np.zeros((h_f, w_f))
+    pad_f = ZeroPad(f, h_g // 2, w_g // 2)
+
+    g_normalized = (g - np.mean(g)) / np.std(g)
+
+    for i_f in range(h_f):
+        for j_f in range(w_f):
+            sub_f = pad_f[i_f: i_f + h_g, j_f: j_f + w_g]
+            sub_f = (sub_f - np.mean(sub_f)) / np.std(sub_f)
+
+            out[i_f, j_f] = np.sum(sub_f * g_normalized)
 
     return out
+
+
+def IsProductOnShelf(shelf: np.ndarray,
+                     product: np.ndarray,
+                     conv_level: ConvLevel = ConvLevel.Best) -> None:
+    out = ZeroMeanCrossCorrelation(shelf, product, conv_level)
+
+    out = out / float(product.shape[0] * product.shape[1])
+
+    out = out > 1500.0
+
+    if np.sum(out) > 0:
+        print(f'{conv_level}: the product is on the shelf')
+    else:
+        print(f'{conv_level}: the product is not on the shelf')

@@ -3,13 +3,17 @@
     "cmap",
     "Exepected",
     "figsize",
+    "ifft",
     "imread",
     "imshow",
     "ndarray",
     "neig",
     "skimage",
+    "soldout",
     "subimage",
     "отрисованными",
+    "паддингу",
+    "подизображения",
     "попиксельных"
   ]
 }
