@@ -1,5 +1,6 @@
+import random
 import sys
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 import cv2
 import numpy as np
@@ -106,15 +107,17 @@ def SetGrid(ax: Axes,
   ax.grid(which='major', linewidth=major_line_width)
 
 
-def PlotImages(image_paths: list[str],
+def PlotImages(images: list[str] | list[Image],
                title: str = "",
                hists_titles: list[str] | None = None,
-               plot_only_hists: bool = False):
+               plot_only_hists: bool = False,
+               figsize: tuple[int, int | None | Literal[0]] = (12, None),
+               columns_amount: int = 3):
   """
   Отображает изображения или их RGB гистограммы в виде сетки графиков.
 
   Args:
-      image_paths (list[str]): список путей к изображениям для отображения.
+      images (list[str]): список путей к изображениям для отображения или сами изображения.
       title (str, optional): общий заголовок для всей сетки графиков. Defaults to "".
       hists_titles (list[str] | None, optional): список заголовков для гистограмм 
                                                     (или изображений, если 
@@ -124,47 +127,65 @@ def PlotImages(image_paths: list[str],
                                                     Defaults to None.
       plot_only_hists (bool, optional): если True, отображаются только гистограммы, 
                                         иначе - изображения. Defaults to False.
+      image_scale (float, optional): коэффициент масштабирования изображений.
+                                     По умолчанию 1.0 (оригинальный размер).
+                                     Меньше 1.0 - уменьшение, больше 1.0 - увеличение.
 
   Raises:
-      ValueError: Если длины списков `image_paths` и `hists_titles` не совпадают.
+      ValueError: Если длины списков `images` и `hists_titles` не совпадают.
   """
 
-  amount = len(image_paths)
+  amount = len(images)
 
   if amount == 0:
     return
 
-  if hists_titles is None:
-    hists_titles = image_paths  # используем пути, заголовки не предоставлены
+  is_paths: bool = isinstance(images[0], str)
+  image_paths: list[str] = images if is_paths else []  # type: ignore
 
-  if amount != len(hists_titles):
-    raise ValueError(
+  if is_paths:
+    if hists_titles is None:
+      hists_titles = image_paths  # используем пути, заголовки не предоставлены
+
+    if amount != len(hists_titles):
+      raise ValueError(
         "PlotImages: lengths of `image_paths` and `hists_titles` "
         f"do not match ({amount} and {len(hists_titles)}).")
 
-  n_rows = (amount + 2) // 3
-  fig, axs = polt.subplots(n_rows, 3, figsize=(12, 4 * n_rows))
+  n_rows = (amount + columns_amount - 1) // columns_amount
+
+  figsize = figsize if figsize[1] is not None and figsize[1] != 0 else (
+    figsize[0], (figsize[0] // columns_amount) * n_rows)
+
+  fig, axs = polt.subplots(n_rows, columns_amount, figsize=figsize)
   fig.suptitle(title, fontsize=24)
 
   for i, ax in enumerate(axs.flatten()):
     ax.axis("off")
 
     if i < amount:
-      ax.set_title(hists_titles[i])
+      image = images[i]
+      if hists_titles is not None:
+        ax.set_title(hists_titles[i])
 
       if not plot_only_hists:
         try:
-          image = cv2.cvtColor(cv2.imread(image_paths[i]), cv2.COLOR_BGR2RGB)
+          if is_paths:
+            image = cv2.cvtColor(cv2.imread(image_paths[i]), cv2.COLOR_BGR2RGB)
 
           ax.imshow(image)
 
         except Exception as exception:
-          print("PlotImages: error loading or displaying image "
-                f"`{image_paths[i]}`: {exception}", file=sys.stderr)
+          print("PlotImages: error loading or displaying for "
+                f"`{image_paths[i] if is_paths else f"image_{i}"}`: "
+                f"{exception}", file=sys.stderr)
 
       else:
         try:
-          hist = GetRGBImageHists(cv2.imread(image_paths[i]))
+          if is_paths:
+            image = cv2.imread(image_paths[i])
+
+          hist = GetRGBImageHists(image)  # type: ignore
 
           for color in ("r", "g", "b"):
             ax.plot(hist[color],
@@ -179,7 +200,8 @@ def PlotImages(image_paths: list[str],
 
         except Exception as exception:
           print("PlotImages: error calculating or plotting histogram for "
-                f"`{image_paths[i]}`: {exception}", file=sys.stderr)
+                f"`{image_paths[i] if is_paths else f"image_{i}"}`: "
+                f"{exception}", file=sys.stderr)
 
       SetGrid(ax)
 
@@ -200,7 +222,7 @@ def VerbosePlot(to_plot: Any,
       title (str, optional): заголовок графика. Defaults to "".
       x_label (str, optional): метка оси X. Defaults to "".
       y_label (str, optional): метка оси Y. Defaults to "".
-      figure_size (Tuple[float, float], optional): размер фигуры (ширина, высота). 
+      figure_size (tuple[float, float], optional): размер фигуры (ширина, высота). 
                                                    Defaults to (10, 6).
   """
 
@@ -381,3 +403,230 @@ def BlendedImage(source: Image,
     blended_image[:, :, channel] = blended_channel.reshape(target.shape[:2])
 
   return blended_image
+
+
+def CoverWithCells(image: Image,
+                   cell_size: int,
+                   cells_amount: int
+                   ) -> tuple[Image, list[tuple[int, int]]]:
+  """
+  Покрывает изображение ячейками заданного размера, 
+  стараясь выделить области с наибольшим количеством черных пикселей.
+
+  Args:
+      image (Image): исходное изображение (numpy ndarray). Должно быть бинарным (черно-белым).
+      cell_size (int): размер стороны квадратной ячейки в пикселях.
+      cells_amount (int): максимальное количество ячеек, которые нужно выделить.
+
+  Returns:
+      tuple[Image, list[tuple[int, int]]]: кортеж, содержащий:
+          - celled_image (Image): Изображение, на котором выделены ячейки (белые прямоугольники).
+          - cell_corners (list[tuple[int, int]]): Список координат верхних левых углов выделенных ячеек.
+  """
+
+  def CalcBlackPixelPercentage(image: Image,
+                               top_left_corner: tuple[int, int]) -> int:
+    """
+    Вычисляет процент черных пикселей в заданной области изображения.
+
+    Args:
+        image (Image): исходное изображение (numpy ndarray).
+        top_left_corner (tuple[int, int]): координаты верхнего левого угла области.
+
+    Returns:
+        int: процент черных пикселей в области (от 0 до 100). 
+             Возвращает 0, если область выходит за границы изображения.
+    """
+
+    x, y = top_left_corner
+    bottom_right_corner = (x + cell_size, y + cell_size)
+
+    height, width = image.shape
+    if x < 0 or y < 0 or bottom_right_corner[0] > width or bottom_right_corner[1] > height:
+      return 0
+
+    square_area = image[y:bottom_right_corner[1], x:bottom_right_corner[0]]
+
+    black_pixels = np.sum(square_area == 0)
+
+    percentage = (black_pixels / cell_size**2) * 100
+
+    return percentage
+
+  # список для хранения координат углов ячеек
+  cell_corners: list[tuple[int, int]] = []
+  height, _ = image.shape
+
+  celled_image = image.copy()
+
+  # списки для хранения информации о строках и столбцах
+  lines_rows: list[int] = []
+  left_right_black_pixels_cols: list[tuple[int, int]] = []
+
+  # проходим по изображению с шагом, равным размеру ячейки (по вертикали)
+  for y in range(0, height, cell_size):
+    start_y = y + 1 if y + 1 < height else height
+    end_y = min(y + cell_size, height)
+
+    # индексы черных пикселей в текущей строке
+    row_indices, col_indices = np.where(celled_image[start_y:end_y, :] == 0)
+
+    # самые левые и самые правые координаты черных пикселей в текущей строке
+    try:
+      left_right_black_pixels_cols.append((np.min(col_indices).astype(int),
+                                           np.max(col_indices).astype(int)))
+    except ValueError:
+      left_right_black_pixels_cols.append((0, 0))
+
+    row_indices = row_indices + start_y
+
+    lines_rows.append(start_y - 1)
+    # рисуем горизонтальную линию в celled_image
+    celled_image[start_y - 1, :] = 0
+
+  # определяем количество строк
+  len_lines_rows = len(lines_rows) if lines_rows[-1] == height else len(lines_rows) - 1
+
+  # нужно ли выбирать только одну ячейку на строке
+  is_only_one = len_lines_rows >= cells_amount
+
+  # проходим по вычисленным строкам
+  for line_index in range(len_lines_rows):
+    left_b, right_b = left_right_black_pixels_cols[line_index]
+
+    curr_pos = left_b
+
+    # перебираем координаты по горизонтали, пока не достигнем правой границы
+    while (curr_pos < right_b):
+      curr_corner: tuple[int, int] = (curr_pos, lines_rows[line_index])
+
+      is_appended: bool = False
+      if CalcBlackPixelPercentage(celled_image, curr_corner) > 25 and\
+              len(cell_corners) < cells_amount:
+        cell_corners.append(curr_corner)
+
+        x, y = curr_corner
+        bottom_right_corner = (x + cell_size, y + cell_size)
+        cv2.rectangle(celled_image, curr_corner,
+                      bottom_right_corner, (255, 255, 255), -1)
+
+        is_appended = True
+
+        # нужно выбрать только одну ячейку на строке, выходим из цикла
+        if is_only_one:
+          break
+
+      curr_pos += cell_size if is_appended else 1
+
+  return celled_image, cell_corners
+
+
+def FindAndCalcCells(image: Image,
+                     cell_size: int,
+                     cells_amount: int) -> list[tuple[int, int]]:
+  """
+  Находит и вычисляет координаты ячеек на изображении, 
+  содержащих наибольшее количество черных пикселей.
+
+  Args:
+      image (Image): исходное цветное изображение (numpy ndarray).
+      cell_size (int): размер стороны квадратной ячейки в пикселях.
+      cells_amount (int): максимальное количество ячеек, которые нужно найти.
+
+  Returns:
+      list[tuple[int, int]]: список координат верхних левых углов найденных ячеек.
+  """
+
+  gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+  blurred = cv2.GaussianBlur(gray_image, (5, 5), 0)
+  _, binary_image = cv2.threshold(blurred, 190, 255, cv2.THRESH_BINARY)
+
+  # VerbosePlot(binary_image, is_image=True)
+
+  celled_image, corners = CoverWithCells(binary_image, cell_size, cells_amount)
+
+  # VerbosePlot(celled_image, is_image=True)
+
+  return corners
+
+
+def CreateMosaic(image: Image,
+                 coords: list[tuple[int, int]],
+                 cell_size: int,
+                 cell_number: int) -> Image:
+  """
+  Создает мозаику из фрагментов изображения, расположенных в заданных координатах.
+
+  Args:
+      image (Image): исходное изображение (numpy ndarray).
+      coords (list[tuple[int, int]]): список координат верхних левых углов фрагментов изображения, которые будут использоваться для создания мозаики.
+      cell_size (int): размер стороны квадратного фрагмента изображения в пикселях.
+      cell_number (int): максимальное количество фрагментов, которые будут использованы для создания мозаики.
+
+  Returns:
+      Image: изображение мозаики (numpy ndarray). 
+             Возвращает пустой массив, если список координат пуст.
+  """
+
+  if not coords:
+    return np.array([])
+
+  effective_cell_number = min(cell_number, len(coords))
+
+  num_cols = int(np.ceil(np.sqrt(effective_cell_number)))
+  num_rows = int(np.ceil(effective_cell_number / num_cols))
+
+  mosaic = np.full((num_rows * cell_size, num_cols * cell_size,
+                    image.shape[2]), 255, dtype=image.dtype)
+
+  for i in range(effective_cell_number):
+    x, y = coords[i]
+
+    if y + cell_size > image.shape[0] or x + cell_size > image.shape[1]:
+      print(f"CreateMosaic: coordinate ({x}, {y}) leads to out-of-bounds access, skip.")
+      continue
+
+    row = i // num_cols
+    col = i % num_cols
+    mosaic[row * cell_size:(row + 1) * cell_size,
+           col * cell_size:(col + 1) * cell_size] =\
+        image[y:y + cell_size, x:x + cell_size]
+
+  return mosaic
+
+
+def DrawCellBoundaries(image: Image,
+                       coords: list[tuple[int, int]],
+                       cell_size: int,
+                       color: tuple[int, int, int] | int = (0, 255, 0),
+                       thickness: int = 4) -> Image:
+  """
+  Рисует границы вокруг ячеек на изображении по заданным координатам.
+
+  Args:
+      image (Image): исходное изображение (numpy ndarray).
+      coords (list[tuple[int, int]]): список координат верхних левых углов ячеек.
+      cell_size (int): размер стороны квадратной ячейки в пикселях.
+      color (tuple[int, int, int] | int, optional): цвет границы ячейки. Может быть кортежем (R, G, B) или целым числом (для оттенков серого). Defaults to (0, 255, 0).
+      thickness (int, optional): толщина границы ячейки в пикселях. Defaults to 4.
+
+  Returns:
+      Image: изображение с нарисованными границами ячеек (numpy ndarray). 
+                  Возвращает копию исходного изображения, если список координат пуст.
+  """
+
+  if not coords:
+    return image.copy()
+
+  output_image = image.copy()
+
+  for x, y in coords:
+    if y + cell_size > output_image.shape[0] or\
+            x + cell_size > output_image.shape[1]:
+      print(
+        f"DrawCellBoundaries: coordinate ({x}, {y}) leads to out-of-bounds access, skip.")
+      continue
+
+    cv2.rectangle(output_image, (x, y), (x + cell_size, y + cell_size), color, thickness)
+
+  return output_image
