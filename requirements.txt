@@ -1,9 +1,9 @@
+scipy==1.12.0
 scikit-image
 scikit-learn
 jupyterlab
 matplotlib
 numpy
 opencv-python
-# ==4.3.0.36
 pytest
 ipykernel

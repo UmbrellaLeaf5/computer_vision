@@ -1,8 +1,12 @@
 import sys
 from typing import Any, TypedDict
 
-import numpy as np
 import cv2
+import numpy as np
+import scipy as sc
+
+from scipy.sparse import lil_matrix, linalg
+
 
 from matplotlib.axes import Axes
 import matplotlib.pyplot as polt  # дань "уважения" ""легенде""
@@ -10,6 +14,7 @@ from matplotlib.ticker import AutoMinorLocator
 
 
 Hist = np.ndarray
+Image = np.ndarray
 
 
 class RGBHists(TypedDict):
@@ -18,13 +23,13 @@ class RGBHists(TypedDict):
     b: np.ndarray
 
 
-def GetIlluminationImageHist(image: np.ndarray) -> Hist:
+def GetIlluminationImageHist(image: Image) -> Hist:
     """
     Вычисляет гистограмму изображения в оттенках серого, 
     которая может быть использована для анализа освещенности.
 
     Args:
-        image (np.ndarray): входное BGR изображение.
+        image (Image): входное BGR изображение.
 
     Returns:
         Hist: гистограмма изображения в оттенках серого. 
@@ -42,12 +47,12 @@ def GetIlluminationImageHist(image: np.ndarray) -> Hist:
                         )
 
 
-def GetRGBImageHists(image: np.ndarray) -> RGBHists:
+def GetRGBImageHists(image: Image) -> RGBHists:
     """
     Вычисляет гистограммы для каждого цветового канала (красный, зеленый, синий) RGB-изображения.
 
     Args:
-        image (np.ndarray): входное BGR изображение. 
+        image (Image): входное BGR изображение. 
 
     Returns:
         RGBHists: словарь, содержащий гистограммы для красного ('r'), 
@@ -185,7 +190,8 @@ def VerbosePlot(to_plot: Any,
                 title: str = "",
                 x_label: str = "",
                 y_label: str = "",
-                figure_size: tuple[float, float] = (10, 6)):
+                figure_size: tuple[float, float] = (10, 6),
+                is_image: bool = False):
     """
     Отображает график данных, гибко обрабатывая различные типы входных данных.
 
@@ -221,6 +227,102 @@ def VerbosePlot(to_plot: Any,
         axs.legend()
 
     else:
-        axs.plot(to_plot)
+        if is_image:
+            axs.imshow(to_plot)
+            axs.axis("off")
+
+        else:
+            axs.plot(to_plot)
 
     SetGrid(axs)
+
+
+def CreateSparseMatrix(source: Image,
+                       target: Image,
+                       mask: Image,
+                       alpha: float) -> tuple[lil_matrix, np.ndarray]:
+    def CalcSparseMatrixElement(A: lil_matrix,
+                                b: np.ndarray,
+                                row: int,
+                                column: int,
+                                mask: Image):
+        if mask[row, column] > 0:
+            src_grad = ComputeGradient(source, row, column)
+            trg_grad = ComputeGradient(target, row, column)
+
+            # gradient = (alpha)*source_gradient + (1 - alpha)*target_gradient
+            b[index] = alpha * src_grad + (1 - alpha) * trg_grad
+
+            A[index, index] = 4
+
+            for direction in {(-1, 0), (0, -1), (1, 0), (0, 1)}:
+                dr, dc = direction
+                new_row, new_col = row + dr, column + dc
+
+                if -1 < new_row < height and -1 < new_col < width:
+                    neighbor_idx = new_row * width + new_col
+                    A[index, neighbor_idx] = -1
+        else:
+            # копируем пиксель из целевого изображения
+            A[index, index] = 1
+            b[index] = target[row, column]
+
+    height, width = target.shape
+    num_pixels = height * width
+
+    # A*x = b, где
+    # A — матрица разреженных коэффициентов
+    # x — выходное изображение (в виде столбца)
+    # b — желаемая матрица градиента
+
+    A = lil_matrix((num_pixels, num_pixels))
+    b = np.zeros(num_pixels)
+
+    for row in range(height):
+        for col in range(width):
+            index = row * width + col
+
+            CalcSparseMatrixElement(A, b, row, col, mask)
+
+    return A, b
+
+
+def ComputeGradient(image: Image,
+                    row: int,
+                    column: int) -> float:
+    # 4*x(row, col) - x(row+1, col) - x(row-1, col) - x(row, col+1)
+    # - x(row, col-1) = desired pixel gradient
+    height, width = image.shape
+    gradient = 4 * image[row, column]
+
+    for direction in {(-1, 0), (0, -1), (1, 0), (0, 1)}:
+        dr, dc = direction
+
+        if -1 < row + dr < height and -1 < column + dc < width:
+            gradient -= image[row + dr, column + dc]
+
+    return gradient
+
+
+def BlendColorChannels(source: Image,
+                       target: Image,
+                       mask: Image,
+                       alpha: float) -> Image:
+    blended_image = np.zeros_like(target)
+
+    for channel in range(3):
+        A, b = CreateSparseMatrix(source[:, :, channel],
+                                  target[:, :, channel],
+                                  mask, alpha)
+
+        blended_channel = linalg.lsqr(A, b)[0]
+
+        blended_channel[blended_channel > 255] = 255
+        blended_channel[blended_channel < 0] = 0
+        blended_channel = blended_channel.astype(np.uint8)
+
+        # так как на выходе хотим получить изображение, а не столбец
+        # (который использовался всё это время)
+        blended_image[:, :, channel] = blended_channel.reshape(target.shape[:2])
+
+    return blended_image
