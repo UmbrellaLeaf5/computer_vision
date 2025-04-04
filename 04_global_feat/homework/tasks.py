@@ -1,3 +1,4 @@
+import numpy as np
 import os
 from pathlib import Path
 import sys
@@ -148,57 +149,77 @@ def PlotImages(images: list[str] | list[Image],
 
 def GetImageContours(image: Image) -> list[Contour]:
   """
-  _summary_
+  Возвращает контуры изображения для конкретной задачи.
 
   Args:
-      image (Image): _description_
+      image (Image): исходное изображение (матрица цветов).
 
   Returns:
-      list[Contour]: _description_
+      list[Contour]: список контуров, найденных на изображении.
   """
 
   gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+  # Contrast Limited Adaptive Histogram Equalization: для улучшения контраста
   clahe = cv2.createCLAHE(clipLimit=1.2, tileGridSize=(8, 8)).apply(gray)
 
+  # медианный фильтр для удаления шума
   blur = cv2.medianBlur(clahe, 9)
+
+  # расширение (для соединения разрывов в контурах)
   dilate = cv2.dilate(blur, np.ones((5, 5), np.uint8), iterations=3)
 
+  # двусторонний фильтр для сглаживания
   blur = cv2.bilateralFilter(dilate, d=9, sigmaColor=50, sigmaSpace=40)
+
+  # пороговая обработка для бинаризации изображения
   th2 = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 15, 3)
 
+  # расширение (для улучшения контуров перед поиском)
   erode = cv2.dilate(th2, np.ones((3, 3), np.uint8), iterations=3)
-  contours, _ = cv2.findContours(erode, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
+  contours, _ = cv2.findContours(erode, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
   return list(contours)
 
 
 def RightImagesBoolList(target_image: Image,
                         source_images: list[Image],
-                        delta=0.1) -> list[bool]:
+                        delta=0.15,
+                        need_to_draw_contour: bool = False) -> list[bool]:
   """
-  _summary_
+  Сравнивает контур наибольшей площади на целевом изображении с контурами наибольшей площади
+  на каждом из исходных изображений.
 
   Args:
-      target_image (Image): _description_
-      source_images (list[Image]): _description_
-      delta (float, optional): _description_. Defaults to 0.1.
+      target_image (Image): целевое изображение (матрица цветов).
+      source_images (list[Image]): список исходных изображений для сравнения с целевым.
+      delta (float, optional): пороговое значение для `cv2.matchShapes`. Defaults to 0.15.
+      need_to_draw_contour: (bool): флаг, отвечающий за то, нужно ли выводить изображения.
 
   Returns:
-      list[bool]: _description_
+      list[bool]: список булевых значений, где True означает, что контур наибольшей площади
+                  в соответствующем исходном изображении похож на контур наибольшей площади
+                  в целевом изображении (в пределах `delta`).
   """
 
   target_contours = GetImageContours(target_image)
 
+  # контур с наибольшей площадью в целевом изображении
   max_area_target_contour = max(target_contours, key=cv2.contourArea)
 
-  cv2.drawContours(target_image, [max_area_target_contour], -1, [0, 255, 0], 3)
+  if need_to_draw_contour:
+    cv2.drawContours(target_image, [max_area_target_contour], -1, [0, 255, 0], 3)
 
   result: list[bool] = []
 
   for index, image in enumerate(source_images):
+    # контуры из текущего исходного изображения
     contours = GetImageContours(image)
+
+    # контур с наибольшей площадью в текущем исходном изображении
     curr_contour = max(contours, key=cv2.contourArea)
 
+    # сравниваем контуры с использованием cv2.matchShapes и добавляем результат в список
     result.append(True if cv2.matchShapes(max_area_target_contour,
                                           curr_contour,
                   cv2.CONTOURS_MATCH_I1, 0) < delta else False)
