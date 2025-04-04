@@ -1,6 +1,7 @@
 {
   "cSpell.words": [
     "arina",
+    "clahe",
     "cmap",
     "dmitry",
     "Exepected",
@@ -29,6 +30,7 @@
     "soldout",
     "subimage",
     "suptitle",
+    "tqdm",
     "xaxis",
     "xlabel",
     "yaxis",
