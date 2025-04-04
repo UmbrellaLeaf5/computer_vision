@@ -11,14 +11,11 @@ import scipy as sc
 import skimage
 import sklearn
 
-
 from matplotlib.axes import Axes
 import matplotlib.pyplot as polt  # дань "уважения" ""легенде""
 from matplotlib.ticker import AutoMinorLocator
+from PIL import Image as PILImage
 
-from skimage.feature import hog
-import matplotlib.pyplot as plt
-from skimage import exposure
 
 Hist = np.ndarray
 Image = np.ndarray
@@ -225,3 +222,102 @@ def RightImagesBoolList(target_image: Image,
                   cv2.CONTOURS_MATCH_I1, 0) < delta else False)
 
   return result
+
+
+def HOGCrossCorrelation(image_hog: Image,
+                        template_hog: Image) -> Image:
+  """
+  Вычисляет кросс-корреляцию между HOG-визуализацией изображения и HOG-визуализацией шаблона.
+
+  Args:
+      image_hog (Image): HOG-визуализация изображения.
+      template_hog (Image): HOG-визуализация шаблона, который ищем в изображении.
+
+  Returns:
+      Image: массив NumPy, представляющий карту кросс-корреляции.  
+             Яркие области на карте указывают на высокую степень 
+             соответствия между шаблоном и изображением.
+  """
+
+  # паддинг нужен для того, чтобы учесть все возможные позиции шаблона в изображении
+  pad_rows, pad_cols = template_hog.shape[0] - 1, template_hog.shape[1] - 1
+
+  # для избежания граничных эффектов при вычислении кросс-корреляции:
+  padded_image_hog = np.pad(
+      image_hog, ((pad_rows, pad_rows), (pad_cols, pad_cols)),
+      mode="constant"  # Заполняем нулями
+  )
+
+  correlation = cv2.filter2D(padded_image_hog, -1, template_hog)
+
+  return correlation
+
+
+def HOG(image: Image) -> Image:
+  """
+  Вычисляет HOG (Histogram of Oriented Gradients) для входного изображения 
+  и возвращает его визуализацию.
+
+  Args:
+      image (Image): исходное изображение (матрица цветов).
+
+  Returns:
+      Image: HOG-визуализация изображения (NumPy array).
+             Представляет собой изображение, показывающее градиенты и их ориентации.
+  """
+
+  # Вычисляем HOG с использованием skimage.feature.hog.  Параметр visualize=True
+  # указывает, что нам нужна визуализация HOG.
+  _, hog_image = skimage.feature.hog(image, orientations=9,
+                                     pixels_per_cell=(20, 20),
+                                     cells_per_block=(1, 1),
+                                     visualize=True,
+                                     channel_axis=-1)
+  return hog_image
+
+
+def LocateEyes(image: Image,
+               template: Image) -> None:
+  """
+  Находит положение глаз на изображении, используя кросс-корреляцию HOG-дескрипторов.
+
+  Args:
+      image (Image): изображение, на котором нужно найти глаза (матрица цветов).
+      template (Image): шаблон глаза (матрица цветов).
+  """
+
+  image_hog = HOG(image)
+  template_hog = HOG(template)
+
+  correlation = HOGCrossCorrelation(image_hog, template_hog)
+
+  # положение максимального значения кросс-корреляции (первый глаз)
+  _, _, _, max_loc = cv2.minMaxLoc(correlation)
+  pad_rows, pad_cols = template.shape[0] - 1, template.shape[1] - 1
+
+  # координаты верхнего левого угла найденного глаза на исходном изображении
+  top_left = (max_loc[0] - pad_cols,
+              max_loc[1] - pad_rows)
+
+  y, x = top_left[1], top_left[0]
+
+  polt.figure(figsize=(10, 5))
+  polt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+  polt.axis("off")
+
+  polt.plot(x, y, 'o', ms=25, mew=5, mec='k', mfc='none')
+
+  # стираем прямоугольный столб по найденному глазу на карте корреляции,
+  # чтобы лучше найти второй глаз
+  correlation[:, max_loc[0] - template.shape[1] // 2: max_loc[0] + template.shape[1] // 2] = 0
+
+  # положение максимального значения кросс-корреляции (второй глаз)
+  _, _, _, max_loc = cv2.minMaxLoc(correlation)
+  pad_rows, pad_cols = template.shape[0] - 1, template.shape[1] - 1
+  top_left = (max_loc[0] - pad_cols, max_loc[1] - pad_rows)
+
+  y, x = top_left[1], top_left[0]
+
+  polt.plot(x, y, 'o', ms=25, mew=5, mec='k', mfc='none')
+
+  polt.show()
