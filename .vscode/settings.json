@@ -1,6 +1,7 @@
 {
   "cSpell.words": [
     "arina",
+    "CCOEFF",
     "clahe",
     "cmap",
     "dmitry",
@@ -17,6 +18,7 @@
     "linestyle",
     "lsqr",
     "matplotlib",
+    "mgrid",
     "ndarray",
     "neig",
     "numpy",
