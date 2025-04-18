@@ -22,6 +22,8 @@
     "mgrid",
     "ndarray",
     "neig",
+    "newaxis",
+    "nfeatures",
     "numpy",
     "offsetbox",
     "opencv",
