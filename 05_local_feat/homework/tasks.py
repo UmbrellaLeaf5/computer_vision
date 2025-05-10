@@ -1,6 +1,5 @@
 from typing import Any, TypedDict
 
-
 import cv2
 import numpy as np
 from sklearn.cluster import KMeans
@@ -226,130 +225,205 @@ def PredictAndArrayTransform(
   return hist
 
 
-def Puzzle(images_paths: list):
+def Transform(kernel: np.ndarray,
+              points: np.ndarray) -> np.ndarray:
   """
-  Собирает изображения в "пазл", используя SIFT для обнаружения общих признаков 
-  и аффинные преобразования для выравнивания и слияния изображений.
+  Применяет аффинное преобразование к набору точек, 
+  используя заданное ядро (матрицу).
 
   Args:
-      images_paths: список путей к изображениям, которые нужно объединить.
+      kernel (np.ndarray): матрица преобразования.
+      points (np.ndarray): массив координат точек (Nx3, где N - количество точек, а столбцы - x, y, 1).
+
+  Returns:
+      np.ndarray: массив преобразованных координат точек (Nx3).
   """
 
-  n_features = 1000
-  n_octave_layers = 3
-  contrast_threshold = 0.04
-  edge_threshold = 8
-  sigma = 1.3
+  transformed_points = (kernel @ points.T).T
+  return np.divide(transformed_points.T, transformed_points[:, 2]).T
 
-  detector = cv2.SIFT_create(nfeatures=n_features, nOctaveLayers=n_octave_layers,
-                             contrastThreshold=contrast_threshold, edgeThreshold=edge_threshold,
-                             sigma=sigma)
 
-  # для улучшения контрастности
-  clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
-  flann = cv2.BFMatcher(cv2.NORM_L2, False)  # для сопоставления дескрипторов
-  image_base = cv2.imread(images_paths[0])
+def FindRANSACOffset(points: np.ndarray,
+                     transformed_points: np.ndarray) -> np.ndarray | None:
+  """
+  Оценивает смещение (offset) между двумя наборами точек 
+  с использованием упрощенного подхода, похожего на RANSAC.  
 
-  num_images = len(images_paths)
-  grid_size = int(np.sqrt(num_images))
-  H, W = (image_base.shape[0] * 2 * grid_size,
-          image_base.shape[1] * 2 * grid_size)
+  (он предполагает, что смещение является константой для всех точек)
 
-  final = np.zeros((H, W, 3))
-  row_start = H // 2 - image_base.shape[0] // 2
-  row_end = H // 2 + image_base.shape[0] // 2
-  col_start = W // 2 - image_base.shape[1] // 2
-  col_end = W // 2 + image_base.shape[1] // 2
-  final[row_start:row_end, col_start:col_end] = image_base / 255
-  del image_base
+  Args:
+      points (np.ndarray): исходный набор точек (Nx3).
+      transformed_points (np.ndarray): набор преобразованных точек (Nx3).
 
-  # хранит аффинные преобразования относительно базового изображения
-  bases = [[] for _ in range(num_images)]
-  candidates = list(range(1, num_images))  # идентификаторы необработанных изображений
-  center = [0]  # идентификаторы изображений, добавленных в пазл
-  checked = []  # идентификаторы изображений, которые были проверены на соответствие
-  ratio_thresh = 0.47  # порог отношения расстояний для отбора хороших соответствий
+  Returns:
+      np.ndarray: оптимальное смещение (offset) в формате NumPy array [dx, dy].
+      (возвращает None, если не найдено подходящего смещения)
+  """
 
-  while center:
-    i = center.pop()
-    loc_image_i = cv2.imread(images_paths[i])
+  best_offset = None
+  best_loss = np.inf
 
-    yrcb_i = cv2.cvtColor(loc_image_i, cv2.COLOR_RGB2YCrCb)
-    bright_i = clahe.apply(yrcb_i[:, :, 0])
-    yrcb_i[:, :, 0] = bright_i
-    loc_image_i = cv2.cvtColor(yrcb_i, cv2.COLOR_YCrCb2RGB)
+  for point, transformed_point in zip(points, transformed_points):
+    offset = (transformed_point - point)[:2]
 
-    # обнаружение ключевых точек и вычисление дескрипторов SIFT
-    keypoints_i, descriptors_i = detector.detectAndCompute(loc_image_i, None)
+    transformation = np.eye(3)
+    transformation[:2, 2] = offset
 
-    # если дескрипторы не найдены, переходим к следующему изображению
-    if descriptors_i is None:
-      continue
+    tmp = Transform(transformation, points)
+    tmp_loss = np.linalg.norm(tmp - transformed_points)
+    if tmp_loss < best_loss:
+      best_loss = tmp_loss
+      best_offset = offset
 
-    # поиск соответствий с другими изображениями
-    while candidates:
-      j = candidates.pop()
-      checked.append(i)
+  return best_offset
 
-      loc_image_j = cv2.imread(images_paths[j])
 
-      yrcb_j = cv2.cvtColor(loc_image_j, cv2.COLOR_RGB2YCrCb)
-      bright_j = clahe.apply(yrcb_j[:, :, 0])
-      yrcb_j[:, :, 0] = bright_j
-      loc_image_j = cv2.cvtColor(yrcb_j, cv2.COLOR_YCrCb2RGB)
+def GetShift(first: np.ndarray,
+             second: np.ndarray
+             #  , puzzle_dir
+             ) -> np.ndarray:
+  """
+  Вычисляет смещение между двумя изображениями, 
+  используя алгоритмы SIFT и RANSAC.
 
-      # обнаружение ключевых точек и вычисление дескрипторов SIFT
-      keypoints_j, descriptors_j = detector.detectAndCompute(loc_image_j, None)
+  Args:
+      first (np.ndarray): первое изображение.
+      second (np.ndarray): второе изображение.
 
-      # если дескрипторы не найдены, переходим к следующему изображению
-      if descriptors_j is None:
-        continue
+  Returns:
+      np.ndarray: смещение между двумя изображениями в формате NumPy array [dy, dx]. 
+      (Смещение указывает, 
+      насколько нужно сдвинуть второе изображение, чтобы оно совпадало с первым)
+  """
 
-      # поиск соответствий между дескрипторами
-      raw_matches = flann.knnMatch(np.asarray(descriptors_i, np.float32),
-                                   np.asarray(descriptors_j, np.float32), k=2)
+  hyp_params_1: dict
+  hyp_params_2: dict
 
-      # отбор хороших соответствий на основе отношения расстояний
-      good_matches = [m for m, n in raw_matches if len(
-        raw_matches[0]) >= 2 and m.distance < ratio_thresh * n.distance]
+  # match puzzle_dir:
+  #   case 'puzzle/su_fighter_shuffle' | 'puzzle/home_shuffle':
+  #     pass
+  #   case 'puzzle/su_fighter_shuffle':
+  #     pass
 
-      # найдено достаточно хороших соответствий ---
-      if len(good_matches) >= 3:
-        # определение координат соответствующих точек
-        points1 = np.float32([keypoints_i[match.queryIdx].pt for match in good_matches])
-        points2 = np.float32([keypoints_j[match.trainIdx].pt for match in good_matches])
+  hyp_params_2 = dict(nfeatures=500,
+                      nOctaveLayers=11,
+                      contrastThreshold=0.03,
+                      edgeThreshold=10,
+                      sigma=1.7)
 
-        # создание маски для области, где будет добавлено новое изображение
-        mask = np.uint8(cv2.cvtColor(final.astype(np.float32) * 255, cv2.COLOR_BGR2GRAY) == 0)
-        # эрозия для уменьшения шума
-        mask = cv2.erode(mask, np.ones((3, 3)), iterations=2)
-        # расширение для восстановления формы
-        mask = cv2.dilate(mask, np.ones((3, 3)), iterations=2)
+  hyp_params_1 = dict(nfeatures=first.size // second.size * 500,
+                      nOctaveLayers=11,
+                      contrastThreshold=0.03,
+                      edgeThreshold=10,
+                      sigma=1.7)
 
-        out_affine = cv2.estimateAffine2D(points2, points1)
+  sift_2 = cv2.SIFT_create(**hyp_params_2)
+  sift_1 = cv2.SIFT_create(**hyp_params_1)
 
-        if out_affine[0] is not None:
-          center.append(j)
+  FLANN_INDEX_KDTREE = 2
+  index_params = dict(algorithm=FLANN_INDEX_KDTREE,
+                      trees=15)
+  search_params = dict(checks=150)
 
-          transformed_image = np.zeros((H, W, 3))
-          row_start = H // 2 - loc_image_j.shape[0] // 2
-          row_end = H // 2 + loc_image_j.shape[0] // 2
-          col_start = W // 2 - loc_image_j.shape[1] // 2
-          col_end = W // 2 + loc_image_j.shape[1] // 2
-          transformed_image[row_start:row_end, col_start:col_end] = loc_image_j / 255
+  flann = cv2.FlannBasedMatcher(index_params,
+                                search_params)
 
-          for base in bases[i]:
-            bases[j].append(base)
-            transformed_image = cv2.warpAffine(transformed_image, base, (W, H))
+  k_points_1, descriptors_1 = sift_1.detectAndCompute(first, None)
+  k_points_2, descriptors_2 = sift_2.detectAndCompute(second, None)
 
-          bases[j].append(out_affine[0])
+  matches = flann.knnMatch(descriptors_1, descriptors_2, k=2)
+  ratio_thresh = 0.4
+  good_matches = []
 
-          # применяем преобразование к изображению
-          transformed_image = cv2.warpAffine(transformed_image, out_affine[0], (W, H))
+  for m, n in matches:
+    if m.distance < ratio_thresh * n.distance:
+      good_matches.append(m)
 
-          # накладываем преобразованное изображение на результирующее
-          final += np.repeat(mask[..., np.newaxis], 3, axis=-1) * transformed_image
+  points = np.array(
+    [[k_points_1[m.queryIdx].pt[1],
+      k_points_1[m.queryIdx].pt[0], 1] for m in good_matches])
 
-    candidates = [k for k in range(1, num_images) if k not in center and k not in checked]
+  transformed_points = np.array(
+    [[k_points_2[m.trainIdx].pt[1],
+      k_points_2[m.trainIdx].pt[0], 1] for m in good_matches])
 
-  VerbosePlot(final, is_image=True)
+  shift = FindRANSACOffset(transformed_points, points)
+
+  if shift is not None:
+    shift[0] = round(shift[0])
+    shift[1] = round(shift[1])
+
+  return np.array(shift, dtype=np.int32)
+
+
+def StitchImagesRD(left: np.ndarray,
+                   right: np.ndarray,
+                   shift: np.ndarray) -> np.ndarray:
+  """
+  Сшивает два изображения,
+  сдвигая правое изображение относительно левого, 
+  используя заданное смещение.
+
+  Args:
+      left (np.ndarray): левое изображение.
+      right (np.ndarray): правое изображение.
+      shift (np.ndarray): смещение между двумя изображениями в формате NumPy array [dy, dx].
+
+  Returns:
+      np.ndarray: сшитое изображение.
+  """
+
+  new_shape = [max(left.shape[0], right.shape[0] + shift[0]),
+               max(left.shape[1], right.shape[1] + shift[1]), 3]
+
+  new_image = np.zeros(shape=new_shape)
+
+  new_image[0:left.shape[0], 0:left.shape[1], :] = left
+  new_image[shift[0]:right.shape[0] + shift[0],
+            shift[1]:right.shape[1] + shift[1], :] = right
+
+  new_image = new_image.astype(np.uint8)
+
+  return new_image
+
+
+def StitchImages(first: np.ndarray,
+                 second: np.ndarray,
+                 shift: np.ndarray) -> np.ndarray:
+  """
+  Сшивает два изображения, 
+  сначала корректируя смещение, а затем сшивая изображения.
+
+  Args:
+      first (np.ndarray): первое изображение.
+      second (np.ndarray): второе изображение.
+      shift (np.ndarray): смещение между двумя изображениями в формате NumPy array [dy, dx].
+
+  Returns:
+      np.ndarray: сшитое изображение.
+  """
+
+  if shift[0] >= 0 and shift[1] < 0:
+    shift[1] *= -1
+
+    first = np.pad(first, ((0, 0), (shift[1], 0), (0, 0)))
+
+    shift[1] = 0
+
+  elif shift[0] < 0 and shift[1] >= 0:
+    shift[0] *= -1
+
+    first = np.pad(first, ((shift[0], 0), (0, 0), (0, 0)))
+
+    shift[0] = 0
+
+  elif shift[0] < 0 and shift[1] < 0:
+    shift[0] *= -1
+    shift[1] *= -1
+
+    first = np.pad(first, ((shift[0], 0), (shift[1], 0), (0, 0)))
+
+    shift[0] = 0
+    shift[1] = 0
+
+  return StitchImagesRD(first, second, shift)
