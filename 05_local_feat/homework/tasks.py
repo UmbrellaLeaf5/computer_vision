@@ -171,7 +171,8 @@ def TrainKMeans(
 def PredictAndArrayTransform(
     image_path: str,
     k_means: KMeans,
-    clusters_amount: int
+    clusters_amount: int,
+    show_hists: bool = False
 ) -> np.ndarray:
   """
   Вычисляет гистограмму визуальных слов для изображения, 
@@ -181,6 +182,7 @@ def PredictAndArrayTransform(
       image_path (str): путь к изображению.
       k_means (KMeans): обученная модель KMeans.
       clusters_amount (int): количество кластеров (визуальных слов).
+      show_hists (bool): отображать ли predict гистограммы. Defaults to False.
 
   Returns:
       np.ndarray: нормализованная гистограмма визуальных слов в виде массива NumPy.
@@ -191,11 +193,35 @@ def PredictAndArrayTransform(
     return np.zeros(clusters_amount)
 
   visual_words = k_means.predict(descriptors)
-  hist, _ = np.histogram(visual_words, bins=clusters_amount, range=(0, clusters_amount))
+  hist, bin_edges = np.histogram(visual_words,
+                                 bins=clusters_amount,
+                                 range=(0, clusters_amount))
   hist = hist.astype(np.float32)
 
-  if hist.sum() != 0:
-    hist /= hist.sum()
+  if hist.max() != 0:
+    hist /= hist.max()
+
+  if show_hists:
+    _, (ax, ax_2) = polt.subplots(1, 2, figsize=(12, 6))
+    image = cv2.cvtColor(cv2.imread(image_path), cv2.COLOR_BGR2RGB)
+
+    ax.imshow(image)
+    ax.set_title("Source image")
+    ax.axis("off")
+
+    ax_2.bar(bin_edges[:-1],
+             hist,
+             width=np.diff(bin_edges),
+             color='skyblue',
+             edgecolor='black')
+
+    ax_2.grid(axis='y',
+              alpha=0.75)
+    ax_2.set_title("Hist Prediction")
+    ax_2.set_ylim(0, 1)
+
+    polt.tight_layout()
+    polt.show()
 
   return hist
 
